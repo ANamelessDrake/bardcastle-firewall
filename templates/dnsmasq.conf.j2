@@ -13,9 +13,14 @@ interface={{ lan_interface }}
 # router for DNS, so dnsmasq must listen on the VPN interface too.
 interface=wg0
 
-# Bind only to the interfaces we are listening on — do not bind to 0.0.0.0.
-# This prevents dnsmasq from answering queries arriving on the WAN interface.
-bind-interfaces
+# Bind only to the interfaces we are listening on (LAN + wg0), never the WAN.
+# Use bind-dynamic (not bind-interfaces): it still scopes DNS to these
+# interfaces, but tolerates one not existing yet at startup. This matters on
+# boot, where dnsmasq can start before wg-quick brings up wg0; bind-interfaces
+# would abort with "unknown interface wg0" and take DNS/DHCP down until a
+# manual restart, whereas bind-dynamic starts anyway and binds wg0 when it
+# appears.
+bind-dynamic
 
 # =============================================================================
 # Upstream DNS Servers
