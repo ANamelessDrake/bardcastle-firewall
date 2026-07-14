@@ -45,6 +45,11 @@ domain={{ domain }}
 # A host "fileserver" becomes "fileserver.{{ domain }}" in DNS answers.
 expand-hosts
 
+# The router answers to its own name on the LAN, so you can reach the dashboard
+# and SSH by name instead of by IP (e.g. https://{{ router_name }}/ instead of
+# https://{{ lan_ip }}/). Both the short name and the FQDN resolve to the LAN IP.
+host-record={{ router_name }},{{ router_name }}.{{ domain }},{{ lan_ip }}
+
 # =============================================================================
 # VPN Client Names
 # =============================================================================

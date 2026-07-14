@@ -56,11 +56,15 @@ def setup(config: dict) -> dict:
     dhcp_start = network["dhcp_start"]
     dhcp_end = network["dhcp_end"]
     domain = network.get("domain", "bardcastle.lan")
+    # Name the router answers to on the LAN, so you can reach it by name
+    # (dashboard, SSH) instead of by IP. Resolves to the LAN IP via dnsmasq.
+    router_name = network.get("router_name", "bardcastle-gates")
 
     print(f"LAN interface : {lan_interface}")
     print(f"LAN IP        : {lan_ip}")
     print(f"DHCP range    : {dhcp_start} - {dhcp_end}")
     print(f"Domain        : {domain}")
+    print(f"Router name   : {router_name}")
 
     # Prompt for upstream DNS servers
     import click
@@ -77,6 +81,7 @@ def setup(config: dict) -> dict:
         "dhcp_start": dhcp_start,
         "dhcp_end": dhcp_end,
         "domain": domain,
+        "router_name": router_name,
         "dns_servers": dns_servers,
         "dhcp_hook_path": DHCP_HOOK_PATH,
     })
