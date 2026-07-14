@@ -1,0 +1,35 @@
+# /etc/wireguard/wg0.conf
+# WireGuard server (tunnel endpoint) configuration
+# Managed by bardcastle-firewall — do not edit manually
+
+[Interface]
+# Server's private key (keep this secret!)
+PrivateKey = {{ server_private_key }}
+
+# VPN subnet address for this server
+Address = {{ server_ip }}/24
+
+# UDP port to listen on for incoming WireGuard connections
+ListenPort = {{ vpn_port }}
+
+# Optional: PostUp/PostDown hooks for nftables integration.
+# These are commented out because the main nftables.conf already includes
+# the WireGuard accept rules and NAT masquerade. Uncomment only if you
+# prefer to manage WireGuard firewall rules dynamically on interface up/down.
+#
+# PostUp = nft add rule inet filter input iifname "wg0" accept
+# PostUp = nft add rule inet filter forward iifname "wg0" accept
+# PostUp = nft add rule ip nat postrouting oifname "{{ wan_interface }}" masquerade
+# PostDown = nft flush chain inet filter input
+# PostDown = nft flush chain inet filter forward
+
+# =============================================================================
+# Peer Definitions
+# =============================================================================
+{% for client in clients %}
+
+[Peer]
+# {{ client.name | default('Client ' ~ loop.index) }}
+PublicKey = {{ client.public_key }}
+AllowedIPs = {{ client.ip }}/32
+{% endfor %}

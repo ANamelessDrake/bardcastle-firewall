@@ -1,0 +1,27 @@
+# /etc/systemd/network/10-wan.network
+# WAN (upstream / Internet-facing) interface configuration
+# Managed by bardcastle-firewall — do not edit manually
+
+[Match]
+Name={{ wan_interface }}
+
+[Network]
+# Obtain WAN address via DHCP from the upstream provider
+DHCP=yes
+
+# We run our own DNS resolver (dnsmasq) on the LAN side, so we do not want
+# the ISP's DNS servers injected into /etc/resolv.conf.
+# NTP is fine to accept from upstream.
+{% if wan_static_dns is defined and wan_static_dns %}
+DNS={{ wan_static_dns }}
+{% endif %}
+
+[DHCP]
+# Do not install DNS servers learned from DHCP
+UseDNS=no
+
+# Accept NTP servers from DHCP (useful for time synchronization)
+UseNTP=yes
+
+# Use the interface name as the DHCP client identifier for predictable behavior
+ClientIdentifier=mac

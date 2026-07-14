@@ -1,0 +1,14 @@
+[Unit]
+Description=Bardcastle Firewall first-boot network setup
+After=basic.target
+ConditionPathExists=!/etc/bardcastle/.first-boot-done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/bardcastle-first-login
+StandardOutput=journal+console
+StandardError=journal+console
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Bardcastle Firewall pre-login status banner
+After=basic.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/bardcastle-firewall/bardcastle/banner.sh
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target

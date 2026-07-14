@@ -1,0 +1,8 @@
+[Unit]
+Description=Bardcastle Firewall dynamic DNS update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/bardcastle-fw ddns update

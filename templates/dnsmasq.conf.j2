@@ -1,0 +1,102 @@
+# /etc/dnsmasq.d/bardcastle.conf
+# dnsmasq configuration for DNS caching and DHCP services
+# Managed by bardcastle-firewall — do not edit manually
+
+# =============================================================================
+# Interface Binding
+# =============================================================================
+
+# Listen on the LAN interface (and loopback implicitly)
+interface={{ lan_interface }}
+
+# Also serve DNS to WireGuard VPN clients. Full-tunnel clients use this
+# router for DNS, so dnsmasq must listen on the VPN interface too.
+interface=wg0
+
+# Bind only to the interfaces we are listening on — do not bind to 0.0.0.0.
+# This prevents dnsmasq from answering queries arriving on the WAN interface.
+bind-interfaces
+
+# =============================================================================
+# Upstream DNS Servers
+# =============================================================================
+
+# Do not read /etc/resolv.conf for upstream servers — we define them here
+no-resolv
+
+# Upstream DNS resolvers
+{% for dns_server in dns_servers %}
+server={{ dns_server }}
+{% endfor %}
+
+# =============================================================================
+# Domain Configuration
+# =============================================================================
+
+# Local domain name for the internal network
+domain={{ domain }}
+
+# Expand simple hostnames by appending the domain automatically.
+# A host "fileserver" becomes "fileserver.{{ domain }}" in DNS answers.
+expand-hosts
+
+# =============================================================================
+# VPN Client Names
+# =============================================================================
+
+# Resolve WireGuard VPN clients by name. This file is maintained by
+# 'bardcastle-fw vpn add-client'/'remove-client' and maps each client's
+# label to its VPN IP as both <name>.vpn.{{ domain }} and the short
+# <name>.vpn. dnsmasq re-reads it on SIGHUP (reload), so client changes take
+# effect without a restart.
+addn-hosts=/var/lib/bardcastle/vpn-hosts
+
+# Treat the ".vpn" pseudo-TLD as local: answer it only from the hosts file
+# above and never forward ".vpn" queries upstream.
+local=/vpn/
+
+# =============================================================================
+# DNS Cache
+# =============================================================================
+
+# Cache up to 1000 DNS entries in memory
+cache-size=1000
+
+# =============================================================================
+# DHCP Configuration
+# =============================================================================
+
+# DHCP address pool and default lease time
+dhcp-range={{ dhcp_start }},{{ dhcp_end }},24h
+
+# Tell clients to use this router as their default gateway
+dhcp-option=option:router,{{ lan_ip }}
+
+# Tell clients to use this router as their DNS server
+dhcp-option=option:dns-server,{{ lan_ip }}
+
+# Operate as the authoritative DHCP server on the network. This makes
+# dnsmasq respond to DHCPREQUEST packets for unknown leases with a NAK,
+# forcing clients to re-acquire an address — useful when taking over from
+# a previous DHCP server.
+dhcp-authoritative
+
+# =============================================================================
+# DHCP Event Hook
+# =============================================================================
+
+# Called on lease events (add, old, del) for future integration with
+# inventory tracking, notifications, or dynamic DNS updates.
+dhcp-script={{ dhcp_hook_path }}
+
+# =============================================================================
+# Logging
+# =============================================================================
+
+# Log every DNS query and its answer (visibility into which domains each
+# client contacts). Higher log volume; journald is capped at 100MB so it
+# self-rotates.
+log-queries
+
+# Log all DHCP transactions (lease grants, renewals, releases)
+log-dhcp

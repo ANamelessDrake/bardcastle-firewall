@@ -1,0 +1,184 @@
+#!/usr/sbin/nft -f
+# /etc/nftables.conf
+# Full nftables ruleset for bardcastle-firewall router/gateway
+# Managed by bardcastle-firewall — do not edit manually
+#
+# Interfaces:
+#   WAN: {{ wan_interface }}   (Internet-facing)
+#   LAN: {{ lan_interface }}   (Internal network)
+#   VPN: wg0                   (WireGuard tunnel)
+
+# Start clean — flush any existing rules
+flush ruleset
+
+# =============================================================================
+# inet filter — Applies to both IPv4 and IPv6
+# =============================================================================
+table inet filter {
+
+    # -------------------------------------------------------------------------
+    # CrowdSec / Blocklist Sets
+    # These named sets are populated externally (e.g., by crowdsec-firewall-
+    # bouncer or a cron-driven blocklist updater). Packets from addresses in
+    # these sets are dropped before any other processing.
+    # -------------------------------------------------------------------------
+    set blocklist_v4 {
+        type ipv4_addr
+        flags interval
+        comment "IPv4 blocklist — populated by CrowdSec or external feeds"
+    }
+
+    set blocklist_v6 {
+        type ipv6_addr
+        flags interval
+        comment "IPv6 blocklist — populated by CrowdSec or external feeds"
+    }
+
+    # -------------------------------------------------------------------------
+    # Input Chain — traffic destined for the router itself
+    # -------------------------------------------------------------------------
+    chain input {
+        type filter hook input priority filter; policy drop;
+
+        # Drop traffic from blocklisted sources immediately (WAN only — the
+        # feeds are internet-edge lists and must never match LAN traffic)
+        iifname {{ wan_interface }} ip saddr @blocklist_v4 counter drop comment "Drop blocklisted IPv4"
+        iifname {{ wan_interface }} ip6 saddr @blocklist_v6 counter drop comment "Drop blocklisted IPv6"
+
+        # Accept traffic on the loopback interface
+        iif "lo" accept comment "Allow loopback"
+
+        # Accept established and related connections (return traffic)
+        ct state established,related accept comment "Allow established/related"
+
+        # Drop invalid connection tracking states
+        ct state invalid counter drop comment "Drop invalid ct states"
+
+        # ICMP — allow ping and essential control messages
+        ip protocol icmp accept comment "Allow ICMPv4"
+        ip6 nexthdr icmpv6 accept comment "Allow ICMPv6"
+
+        # --- LAN-facing services ---
+
+        # SSH (TCP 22) — only from the LAN interface
+        iifname {{ lan_interface }} tcp dport 22 accept comment "SSH from LAN"
+
+        # DNS (TCP/UDP 53) — dnsmasq listens on LAN
+        iifname {{ lan_interface }} tcp dport 53 accept comment "DNS TCP from LAN"
+        iifname {{ lan_interface }} udp dport 53 accept comment "DNS UDP from LAN"
+
+        # DHCP (UDP 67-68) — dnsmasq serves DHCP on LAN
+        iifname {{ lan_interface }} udp dport { 67, 68 } accept comment "DHCP from LAN"
+
+        # Web dashboard (HTTPS 443 + HTTP-to-HTTPS redirect 80) from the LAN
+        iifname {{ lan_interface }} tcp dport { 80, 443 } accept comment "Dashboard from LAN"
+
+        # --- WAN-facing services ---
+
+        # WireGuard (UDP {{ vpn_port }}) — accept on the WAN interface
+        iifname {{ wan_interface }} udp dport {{ vpn_port }} accept comment "WireGuard from WAN"
+
+        # --- VPN-facing services (wg0) ---
+        # VPN clients use this router for DNS, so DNS must be reachable over
+        # the tunnel (dnsmasq also listens on wg0). Without this, full-tunnel
+        # clients get no name resolution and every lookup fails.
+        iifname "wg0" udp dport 53 accept comment "DNS UDP from VPN"
+        iifname "wg0" tcp dport 53 accept comment "DNS TCP from VPN"
+        # SSH to the router itself from the VPN (remote management)
+        iifname "wg0" tcp dport 22 accept comment "SSH from VPN"
+
+        # Web dashboard from the VPN - restricted to admin clients only.
+        # Only the VPN IPs of clients flagged admin (bardcastle-fw vpn admin
+        # <name>) may reach the dashboard; every other VPN user is denied by
+        # the default-drop policy below. If no admin clients are configured,
+        # the dashboard is simply not reachable over the tunnel.
+{% if admin_vpn_ips %}
+        iifname "wg0" ip saddr { {{ admin_vpn_ips | join(', ') }} } tcp dport { 80, 443 } accept comment "Dashboard from admin VPN"
+{% else %}
+        # (no admin VPN clients configured; dashboard not exposed over VPN)
+{% endif %}
+
+        # Log and drop everything else (rate-limited to avoid log flooding)
+        limit rate 5/minute burst 10 packets log prefix "nft-input-drop: " level info
+        counter drop comment "Default drop"
+    }
+
+    # -------------------------------------------------------------------------
+    # Forward Chain — traffic passing through the router
+    # -------------------------------------------------------------------------
+    chain forward {
+        type filter hook forward priority filter; policy drop;
+
+        # Drop traffic from blocklisted sources before forwarding
+        ip saddr @blocklist_v4 counter drop comment "Drop blocklisted IPv4 fwd"
+        ip6 saddr @blocklist_v6 counter drop comment "Drop blocklisted IPv6 fwd"
+
+        # Accept established and related connections (return traffic for
+        # forwarded flows, e.g., LAN host replies from the Internet)
+        ct state established,related accept comment "Allow established/related fwd"
+
+        # Drop invalid states
+        ct state invalid counter drop comment "Drop invalid ct states fwd"
+
+        # LAN -> WAN: allow internal hosts to reach the Internet
+        iifname {{ lan_interface }} oifname {{ wan_interface }} accept comment "LAN to WAN"
+
+        # WireGuard -> LAN: allow VPN clients to reach internal resources
+        iifname "wg0" oifname {{ lan_interface }} accept comment "WG to LAN"
+
+        # WireGuard -> WAN: allow VPN clients to reach the Internet (full tunnel)
+        iifname "wg0" oifname {{ wan_interface }} accept comment "WG to WAN"
+
+        # LAN -> WireGuard: allow internal hosts to reach VPN clients
+        iifname {{ lan_interface }} oifname "wg0" accept comment "LAN to WG"
+
+        # WireGuard -> WireGuard: allow VPN clients to reach each other
+        iifname "wg0" oifname "wg0" accept comment "WG to WG"
+
+        # Log and drop everything else
+        limit rate 5/minute burst 10 packets log prefix "nft-forward-drop: " level info
+        counter drop comment "Default drop"
+    }
+
+    # -------------------------------------------------------------------------
+    # Output Chain — traffic originating from the router itself
+    # -------------------------------------------------------------------------
+    chain output {
+        type filter hook output priority filter; policy accept;
+
+        # The router itself is trusted; allow all outbound traffic.
+        # If tighter control is desired, change policy to drop and add
+        # explicit allow rules here.
+    }
+}
+
+# =============================================================================
+# ip nat — IPv4 Network Address Translation
+# =============================================================================
+table ip nat {
+
+    # -------------------------------------------------------------------------
+    # Postrouting — masquerade outbound traffic so LAN/VPN clients appear to
+    # come from the router's WAN IP.
+    # -------------------------------------------------------------------------
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+
+        # Masquerade all traffic leaving via the WAN interface
+        oifname {{ wan_interface }} masquerade comment "NAT for LAN/VPN to WAN"
+    }
+
+    # -------------------------------------------------------------------------
+    # Prerouting — destination NAT (port forwarding)
+    # Add DNAT rules here to expose internal services to the Internet.
+    # -------------------------------------------------------------------------
+    chain prerouting {
+        type nat hook prerouting priority dstnat; policy accept;
+
+        # Example: forward TCP port 8443 on WAN to an internal host
+        # iifname {{ wan_interface }} tcp dport 8443 dnat to 192.168.1.100:443
+
+        # Example: forward UDP port 25565 (Minecraft) to an internal host
+        # iifname {{ wan_interface }} udp dport 25565 dnat to 192.168.1.200:25565
+    }
+}

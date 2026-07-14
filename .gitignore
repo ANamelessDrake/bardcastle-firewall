@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.venv/
+*.img
+*.img.xz
+*.iso
+backups/*.bak
+test-vm-disk.qcow2
+test-vm-ovmf-vars.fd
+
+# Security: never commit stray keys or crash dumps
+privatekey
+publickey
+*.key
+*.pem
+*.crash

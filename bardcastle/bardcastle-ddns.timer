@@ -1,0 +1,10 @@
+[Unit]
+Description=Run bardcastle-fw dynamic DNS update periodically
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh Bardcastle banner every 60 seconds
+
+[Timer]
+OnBootSec=10
+OnUnitActiveSec=60
+
+[Install]
+WantedBy=timers.target

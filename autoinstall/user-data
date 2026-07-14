@@ -1,0 +1,93 @@
+#cloud-config
+autoinstall:
+  version: 1
+
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+
+  # Use entire disk, no LVM (simple for a router)
+  storage:
+    layout:
+      name: direct
+
+  # User account
+  identity:
+    hostname: bardcastle-fw
+    username: admin
+    # Password: changeme (forced reset on first login)
+    password: "$6$CHANGEME$REPLACE.this.with.your.own.hash.run.openssl.passwd.-6.0000000000000000000000000000000"
+
+  # SSH: install and allow password temporarily for first login
+  ssh:
+    install-server: true
+    allow-pw: true
+
+  # Only packages already on the ISO (no network during install)
+  packages:
+    - openssh-server
+
+  snaps: []
+
+  kernel:
+    package: linux-generic
+
+  late-commands:
+    # Serial console for headless/VM use (Bay Trail igb workarounds no longer
+    # needed on the N100/i226-V appliance)
+    - echo 'GRUB_CMDLINE_LINUX_DEFAULT="console=tty0 console=ttyS0,115200"' > /target/etc/default/grub.d/99-bardcastle.cfg
+    - echo 'GRUB_TERMINAL="console serial"' >> /target/etc/default/grub.d/99-bardcastle.cfg
+    - echo 'GRUB_SERIAL_COMMAND="serial --speed=115200"' >> /target/etc/default/grub.d/99-bardcastle.cfg
+    - curtin in-target -- update-grub
+    # Enable serial console getty so login prompt appears on ttyS0
+    - curtin in-target -- systemctl enable serial-getty@ttyS0.service
+
+    # Disable snapd
+    - curtin in-target -- systemctl disable snapd.service snapd.socket snapd.seeded.service || true
+
+    # Disable cloud-init
+    - curtin in-target -- touch /etc/cloud/cloud-init.disabled
+
+    # Disable systemd-resolved
+    - curtin in-target -- systemctl disable systemd-resolved.service
+    - rm -f /target/etc/resolv.conf
+    - echo "nameserver 1.1.1.1" > /target/etc/resolv.conf
+
+    # Copy bardcastle-firewall source (CLI installed on first boot when pip is available)
+    - cp -a /cdrom/bardcastle-firewall /target/opt/bardcastle-firewall
+
+    # Install net-setup and banner scripts
+    - cp /cdrom/bardcastle-firewall/autoinstall/net-setup.sh /target/usr/local/bin/bardcastle-net-setup
+    - chmod +x /target/usr/local/bin/bardcastle-net-setup
+    - cp /target/opt/bardcastle-firewall/bardcastle/banner.sh /target/usr/local/bin/bardcastle-banner
+    - chmod +x /target/usr/local/bin/bardcastle-banner
+    - cp /target/opt/bardcastle-firewall/bardcastle/bardcastle-banner.service /target/etc/systemd/system/
+    - cp /target/opt/bardcastle-firewall/bardcastle/bardcastle-banner.timer /target/etc/systemd/system/
+    - curtin in-target -- systemctl enable bardcastle-banner.service
+    - curtin in-target -- systemctl enable bardcastle-banner.timer
+
+    # Install first-login setup that runs bardcastle network config automatically
+    - cp /cdrom/bardcastle-firewall/autoinstall/first-login-setup.sh /target/usr/local/bin/bardcastle-first-login
+    - chmod +x /target/usr/local/bin/bardcastle-first-login
+    - cp /cdrom/bardcastle-firewall/autoinstall/bardcastle-first-login.service /target/etc/systemd/system/
+    - curtin in-target -- systemctl enable bardcastle-first-login.service
+
+    # System-wide shell aliases
+    - echo "alias c='clear'" > /target/etc/profile.d/bardcastle-aliases.sh
+
+    # Replace default Ubuntu MOTD with our banner
+    - chmod -x /target/etc/update-motd.d/* || true
+    - echo "" > /target/etc/motd
+    - echo "" > /target/etc/issue.net
+    # Add our banner as the only MOTD script (runs on each login)
+    - echo '#!/bin/bash' > /target/etc/update-motd.d/00-bardcastle
+    - echo '/usr/local/bin/bardcastle-banner --motd' >> /target/etc/update-motd.d/00-bardcastle
+    - chmod +x /target/etc/update-motd.d/00-bardcastle
+
+    # Generate initial pre-login banner
+    - curtin in-target -- /usr/local/bin/bardcastle-banner || true
+
+    # Force password change on first login
+    - curtin in-target -- passwd --expire admin
+
+  shutdown: reboot

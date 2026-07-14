@@ -1,0 +1,5 @@
+# Allow the dashboard service user to run only these read-only commands as
+# root. Installed to /etc/sudoers.d/bardcastle-web (mode 0440) by
+# webui/install.sh. Keep this list minimal; it is the dashboard's entire
+# privileged surface.
+bardcastle-web ALL=(root) NOPASSWD: /usr/sbin/nft -j list ruleset, /usr/bin/wg show wg0 dump, /usr/bin/cscli decisions list -o json, /usr/bin/cscli alerts list -o json

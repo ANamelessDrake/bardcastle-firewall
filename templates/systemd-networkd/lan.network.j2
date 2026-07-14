@@ -1,0 +1,21 @@
+# /etc/systemd/network/20-lan.network
+# LAN (internal / downstream) interface configuration
+# Managed by bardcastle-firewall — do not edit manually
+
+[Match]
+Name={{ lan_interface }}
+
+[Network]
+# Static IP for the LAN gateway — this machine IS the default gateway for
+# all devices on the internal network.
+Address={{ lan_ip }}/{{ lan_subnet }}
+
+# No gateway is configured here because this interface faces the internal
+# network. The default route is learned via DHCP on the WAN interface.
+
+# Link-local addressing is not needed on the LAN bridge/interface
+LinkLocalAddressing=no
+
+# Enable LLDP for network topology visibility (optional)
+LLDP=yes
+EmitLLDP=customer-bridge

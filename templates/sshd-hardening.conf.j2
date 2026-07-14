@@ -1,0 +1,38 @@
+# /etc/ssh/sshd_config.d/50-bardcastle-hardening.conf
+# SSH daemon hardening — drop-in configuration
+# Managed by bardcastle-firewall — do not edit manually
+#
+# This file is loaded by the main sshd_config via the Include directive
+# (default on Ubuntu 22.04+). Settings here override defaults.
+
+# Disable root login entirely — use a regular user and sudo
+PermitRootLogin no
+
+# Disable password authentication — key-based auth only
+PasswordAuthentication no
+
+# Enable public key authentication (should already be the default)
+PubkeyAuthentication yes
+
+# Restrict SSH access to a specific user
+AllowUsers {{ ssh_user }}
+
+# Disable X11 forwarding — not needed on a headless router
+X11Forwarding no
+
+# Limit authentication attempts per connection to slow down brute-force attacks
+MaxAuthTries 3
+
+# Send a keepalive to the client every 300 seconds (5 minutes)
+ClientAliveInterval 300
+
+# Disconnect after 2 missed keepalives (i.e., after 10 minutes of inactivity)
+ClientAliveCountMax 2
+
+# Disable unused authentication methods
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+
+# Disable TCP forwarding and agent forwarding unless explicitly needed
+AllowTcpForwarding no
+AllowAgentForwarding no
