@@ -51,15 +51,27 @@ def setup(config: dict) -> dict:
     enable_and_start("vnstat")
     print("vnstat enabled and started.")
 
-    # Configure journald retention
-    print("\n--- Configuring journald retention ---")
-    content = "[Journal]\nSystemMaxUse=100M\n"
+    # Configure journald: persistent storage with a size cap.
+    # Persistent (on-disk /var/log/journal) so logs survive reboots - DHCP
+    # fingerprints, DNS history, and IDS events accumulate over time instead of
+    # being wiped every boot, which matters for after-the-fact investigation.
+    # SystemMaxUse caps disk use so verbose logging (DNS/DHCP) cannot fill the
+    # disk; raise it if you want a longer retention window.
+    print("\n--- Configuring journald (persistent) ---")
+    content = "[Journal]\nStorage=persistent\nSystemMaxUse=500M\n"
     write_config_file(JOURNALD_CONF, content, mode=0o644, backup=True)
     print(f"Wrote {JOURNALD_CONF}")
 
+    # Ensure the persistent journal directory exists before the restart so
+    # journald switches to it immediately (Storage=persistent creates it, but
+    # this makes the first flush deterministic).
+    run_cmd(["mkdir", "-p", "/var/log/journal"])
+    run_cmd(["systemd-tmpfiles", "--create", "--prefix", "/var/log/journal"])
+
     print("Restarting systemd-journald...")
     run_cmd(["systemctl", "restart", "systemd-journald"])
-    print("journald retention configured.")
+    run_cmd(["journalctl", "--flush"])
+    print("journald configured for persistent storage.")
 
     # Mark as configured and save
     mark_configured(config, "monitoring")
