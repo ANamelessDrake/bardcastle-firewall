@@ -79,6 +79,12 @@ cache-size=1000
 # DHCP address pool and default lease time
 dhcp-range={{ dhcp_start }},{{ dhcp_end }},24h
 
+# Owner-labeled static reservations live in a separate runtime file (not this
+# template), so device->owner mappings and reserved IPs survive config
+# re-renders and never carry personal data into the repo. Each line is
+# "<mac>,<reserved-ip>,<name>". dnsmasq re-reads it on SIGHUP (reload).
+dhcp-hostsfile=/var/lib/bardcastle/dhcp-hosts
+
 # Tell clients to use this router as their default gateway
 dhcp-option=option:router,{{ lan_ip }}
 
