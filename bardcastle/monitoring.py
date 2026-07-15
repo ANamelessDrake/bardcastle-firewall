@@ -58,7 +58,12 @@ def setup(config: dict) -> dict:
     # SystemMaxUse caps disk use so verbose logging (DNS/DHCP) cannot fill the
     # disk; raise it if you want a longer retention window.
     print("\n--- Configuring journald (persistent) ---")
-    content = "[Journal]\nStorage=persistent\nSystemMaxUse=500M\n"
+    # Size cap is config-driven so a big-disk deployment can retain more while
+    # the default stays safe for small disks. Set monitoring.journal_max_use in
+    # the config (e.g. "4G") to raise it.
+    journal_max = config.get("monitoring", {}).get("journal_max_use", "500M")
+    content = f"[Journal]\nStorage=persistent\nSystemMaxUse={journal_max}\n"
+    print(f"Journal retention cap: {journal_max}")
     write_config_file(JOURNALD_CONF, content, mode=0o644, backup=True)
     print(f"Wrote {JOURNALD_CONF}")
 
