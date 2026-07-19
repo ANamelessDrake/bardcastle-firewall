@@ -6,8 +6,10 @@
 # Server's private key (keep this secret!)
 PrivateKey = {{ server_private_key }}
 
-# VPN subnet address for this server
-Address = {{ server_ip }}/24
+# VPN subnet address for this server. The IPv6 half is a private ULA prefix
+# (RFC 4193) masqueraded out the WAN, because the ISP prefix is dynamic; a
+# stable ULA keeps client configs valid across ISP prefix changes.
+Address = {{ server_ip }}/24{% if server_ip6 %}, {{ server_ip6 }}/64{% endif %}
 
 # UDP port to listen on for incoming WireGuard connections
 ListenPort = {{ vpn_port }}
@@ -31,5 +33,5 @@ ListenPort = {{ vpn_port }}
 [Peer]
 # {{ client.name | default('Client ' ~ loop.index) }}
 PublicKey = {{ client.public_key }}
-AllowedIPs = {{ client.ip }}/32
+AllowedIPs = {{ client.ip }}/32{% if client.ip6 %}, {{ client.ip6 }}/128{% endif %}
 {% endfor %}

@@ -35,6 +35,10 @@ def apply(config: dict) -> dict:
     from bardcastle.vpn import admin_client_ips
     admin_vpn_ips = admin_client_ips(config)
 
+    # ULA prefix used inside the tunnel; drives the NAT66 masquerade rule so
+    # VPN clients get working IPv6. Absent means the tunnel is IPv4-only.
+    vpn_ip6_prefix = config.get("vpn", {}).get("ip6_prefix")
+
     print(f"WAN interface : {wan_interface}")
     print(f"LAN interface : {lan_interface}")
     print(f"VPN port      : {vpn_port}")
@@ -46,6 +50,7 @@ def apply(config: dict) -> dict:
         "lan_interface": lan_interface,
         "vpn_port": vpn_port,
         "admin_vpn_ips": admin_vpn_ips,
+        "vpn_ip6_prefix": vpn_ip6_prefix,
     })
 
     # Write with backup

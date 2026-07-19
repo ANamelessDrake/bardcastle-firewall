@@ -31,6 +31,40 @@ from bardcastle.utils import (
 VPN_HOSTS_FILE = "/var/lib/bardcastle/vpn-hosts"
 
 
+def _generate_ula_prefix() -> str:
+    """Generate a random /64 ULA prefix (RFC 4193): fd + 40 random bits."""
+    import secrets
+    b = secrets.token_bytes(5)
+    return "fd%02x:%02x%02x:%02x%02x::" % tuple(b)
+
+
+def _ip6_prefix(config: dict) -> str | None:
+    """The tunnel's ULA prefix (e.g. 'fd2a:11a0:bca9::'), or None if IPv4-only."""
+    return config.get("vpn", {}).get("ip6_prefix")
+
+
+def _client_ip6(config: dict, client_ip: str) -> str | None:
+    """Derive a client's tunnel IPv6 from its IPv4 host octet.
+
+    Deterministic (10.10.10.7 -> <prefix>7), so there is no extra per-client
+    state to store and the mapping stays stable if a config is regenerated.
+    """
+    prefix = _ip6_prefix(config)
+    if not prefix:
+        return None
+    return f"{prefix}{client_ip.split('.')[-1]}"
+
+
+def _clients_with_ip6(config: dict) -> list:
+    """Client entries annotated with their derived tunnel IPv6 (for templates)."""
+    out = []
+    for c in config.get("vpn", {}).get("clients", []):
+        entry = dict(c)
+        entry["ip6"] = _client_ip6(config, c["ip"])
+        out.append(entry)
+    return out
+
+
 def _vpn_domain(config: dict) -> str:
     """The subdomain VPN clients are published under, e.g. vpn.example.com."""
     domain = config.get("network", {}).get("domain", "bardcastle.lan")
@@ -101,8 +135,9 @@ def _render_and_apply_server_config(config: dict) -> None:
     content = render_template("wg0.conf.j2", {
         "server_private_key": vpn["server_private_key"],
         "server_ip": vpn["server_ip"],
+        "server_ip6": vpn.get("server_ip6"),
         "vpn_port": vpn["port"],
-        "clients": vpn.get("clients", []),
+        "clients": _clients_with_ip6(config),
     })
     write_config_file("/etc/wireguard/wg0.conf", content, mode=0o600)
 
@@ -130,9 +165,18 @@ def setup(config: dict) -> dict:
     vpn_port = click.prompt("VPN listen port", default=51820, type=int)
 
     # Store VPN config
+    # Dual-stack tunnel: a stable private ULA prefix carries IPv6 inside the
+    # tunnel and is masqueraded out the WAN (NAT66). Without this, a client
+    # routing ::/0 into the tunnel has no IPv6 source address and its IPv6
+    # traffic is blackholed, which breaks IPv6-only destinations.
+    ip6_prefix = _generate_ula_prefix()
+    click.echo(f"VPN IPv6 prefix (ULA): {ip6_prefix}/64")
+
     config["vpn"] = {
         "server_ip": server_ip,
         "port": vpn_port,
+        "ip6_prefix": ip6_prefix,
+        "server_ip6": f"{ip6_prefix}1",
         "server_public_key": public_key,
         "server_private_key": private_key,
         "clients": [],
@@ -303,6 +347,7 @@ def _emit_client_config(config: dict, client: dict, qr_file: str | None = None,
     client_config = render_template("wg-client.conf.j2", {
         "client_private_key": priv_str,
         "client_ip": client["ip"],
+        "client_ip6": _client_ip6(config, client["ip"]),
         "dns_server": config.get("network", {}).get("lan_ip", "10.0.1.1"),
         "server_public_key": vpn["server_public_key"],
         "endpoint": _client_endpoint(config),

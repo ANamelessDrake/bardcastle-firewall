@@ -6,8 +6,9 @@
 # Client's private key (unique per device — keep secret!)
 PrivateKey = {{ client_private_key }}
 
-# VPN address assigned to this client
-Address = {{ client_ip }}/24
+# VPN address assigned to this client. The IPv6 address is required for the
+# ::/0 route below to actually carry traffic; without it IPv6 is blackholed.
+Address = {{ client_ip }}/24{% if client_ip6 %}, {{ client_ip6 }}/64{% endif %}
 
 # Use the router's LAN IP as the DNS server so the client can resolve
 # internal hostnames while connected to the VPN.

@@ -182,3 +182,21 @@ table ip nat {
         # iifname {{ wan_interface }} udp dport 25565 dnat to 192.168.1.200:25565
     }
 }
+{% if vpn_ip6_prefix %}
+
+# =============================================================================
+# ip6 nat — NAT66 for the VPN tunnel
+# =============================================================================
+# VPN clients get addresses from a private ULA prefix rather than the ISP's
+# prefix, because the ISP prefix is dynamic (SLAAC, no delegation) and would
+# invalidate every client config each time it rotates. Masquerading the ULA out
+# the WAN gives tunnel clients working IPv6 with stable client configs.
+table ip6 nat {
+
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+
+        oifname {{ wan_interface }} ip6 saddr {{ vpn_ip6_prefix }}/64 masquerade comment "NAT66 for VPN to WAN"
+    }
+}
+{% endif %}
