@@ -209,6 +209,13 @@ vpn:
   server_ip6: fd00:1234:5678::1  # server's address inside the tunnel
   clients: []                # managed by the vpn subcommands
 
+ddns:
+  hostname: vpn.example.com  # record kept pointed at the current public IP
+  zone_id: Z0123456789ABC
+  credentials_file: /etc/bardcastle/aws-ddns.credentials
+  ipv6: false                # also publish the WAN's IPv6 as an AAAA record
+  hostname6: wan6.example.com   # name for the AAAA (keep separate from the VPN name)
+
 monitoring:
   journal_max_use: 500M      # journald retention cap; raise on a big disk
 
@@ -233,8 +240,28 @@ validates before applying where possible (for example `nft -c -f` before
 
 If your WAN IP is dynamic, the DDNS module keeps a Route 53 record pointed at
 the current WAN IP so VPN clients can always reach the endpoint. A systemd
-timer refreshes it; configure the hostname during `vpn setup` (default
-`vpn.example.com`).
+timer refreshes it every 5 minutes; configure the hostname during `vpn setup`
+(default `vpn.example.com`).
+
+**IPv6.** Setting `ddns.ipv6` also publishes the WAN's current global IPv6 as
+an AAAA record. ISPs delegate the IPv6 prefix dynamically, so anything that
+needs to know this appliance's current IPv6 (a remote allowlist, for example)
+can resolve a stable name instead of being updated out of band.
+
+`hostname6` controls which name carries that AAAA, and by default it is a
+**separate** name from the VPN hostname. Both records can live on one name if
+you prefer, since a dual-stack A plus AAAA is perfectly normal DNS. The reason
+to split them is behavioural rather than technical: the VPN hostname is what
+clients use as their WireGuard `Endpoint`, so an AAAA there makes clients try
+to reach the endpoint over IPv6. WireGuard does not fall back to IPv4 the way a
+browser does, so if inbound UDP on the VPN port is not permitted over IPv6 all
+the way upstream, those clients simply fail to connect.
+
+Consumer gateways commonly route IPv6 while blocking unsolicited inbound, and
+IPv6 has no NAT, so the IPv4 port forward does not cover it: reaching the VPN
+over IPv6 needs its own pinhole for the VPN port. Use one hostname only after
+confirming inbound IPv6 works; otherwise keep them separate, which costs
+nothing.
 
 ## The web dashboard
 
