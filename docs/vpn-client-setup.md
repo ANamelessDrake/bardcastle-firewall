@@ -147,8 +147,33 @@ terminal needed. Save the `.conf` IT sent you to
   - **GNOME:** Settings > Network > VPN > **+** > **Import from file**, pick the `.conf`.
   - **KDE Plasma:** System Settings > Connections > **+** > **Import VPN connection**, pick the `.conf`.
 
-After importing, toggle the tunnel from the system tray / network menu (in
-GNOME, the top-right Quick Settings; in KDE, the network widget).
+After importing, protect the file (it holds your private key) and toggle the
+tunnel from the system tray / network menu (in GNOME, the top-right Quick
+Settings; in KDE, the network widget):
+
+```bash
+sudo chmod 600 /etc/wireguard/bardcastle-vpn.conf
+```
+
+**Important, IPv6 after importing.** NetworkManager does not always carry the
+config's IPv6 address across on import: it often stores the connection with
+`ipv6.method=disabled`, which leaves the tunnel IPv4-only even though the
+config asks for `::/0`. IPv6-only destinations then fail while IPv4 works,
+which is a confusing thing to debug. Check and fix it once, after importing:
+
+```bash
+# Should print "manual" and your IPv6 address. If it prints "disabled", fix it.
+nmcli -g ipv6.method,ipv6.addresses connection show bardcastle-vpn
+
+# Fix (use the IPv6 address from the Address line of the config IT sent you):
+sudo nmcli connection modify bardcastle-vpn \
+    ipv6.method manual ipv6.addresses fd00:1234:5678::2/64
+```
+
+Then toggle the tunnel off and on so the change takes effect. Editing the
+`.conf` file alone is **not** enough once NetworkManager manages the
+connection, because NetworkManager uses its own stored profile and ignores the
+file from then on.
 
 **Auto-connect on boot:** an imported connection is set to connect
 automatically by default, so NetworkManager will bring the VPN up on every
@@ -357,6 +382,32 @@ Dashboard access is independent of SSH: VPN users still have no shell access
 (only your account holds an SSH key), and revoking admin does not disconnect
 the VPN, it only closes the dashboard ports for that client.
 
+**Enabling IPv6 on a client created before the tunnel was dual stack:** the
+server side needs nothing, since each peer already has its IPv6 address in
+`wg0.conf`. Only the device's own config has to change, and **no re-keying is
+required**, so the client keeps its existing keys and QR code. Find the
+client's tunnel IPv6 (it is derived from its IPv4 host octet, so `10.10.10.5`
+becomes `<prefix>::5`) with:
+
+```bash
+sudo bardcastle-fw vpn clients        # names and IPv4 addresses
+sudo grep ip6_prefix /etc/bardcastle/config.yaml
+```
+
+Then on the device, add that address to the `Address` line, keeping the
+existing IPv4 entry:
+
+```ini
+Address = 10.10.10.5/24, fd00:1234:5678::5/64
+```
+
+and reactivate the tunnel. **On Linux clients managed by NetworkManager, that
+file edit alone does nothing** (NetworkManager uses its own stored profile), so
+also run the `nmcli connection modify ... ipv6.method manual ipv6.addresses ...`
+step from the NetworkManager section above. Clients that have not been updated
+keep working normally over IPv4, so this can be rolled out one device at a time
+with no coordinated cutover.
+
 **Offboarding or a lost device:** run `remove-client NAME`. It removes the
 peer's public key from the server, so that device can no longer connect. This
 works for both key modes and needs nothing from the device.
@@ -411,7 +462,7 @@ Notes:
 ```ini
 [Interface]
 PrivateKey = <client private key>
-Address    = 10.10.10.2/24        # this client's VPN address
+Address    = 10.10.10.2/24, fd00:1234:5678::2/64   # this client's VPN addresses
 DNS        = 10.0.1.1             # resolves internal hostnames over the VPN
 
 [Peer]
@@ -425,6 +476,15 @@ PersistentKeepalive = 25
 traffic routes through the company network. For split tunnel (reach only
 internal resources, with personal traffic going out directly), replace it with
 the internal subnets, for example `10.0.1.0/24, 10.10.10.0/24`.
+
+The tunnel is **dual stack**: each client gets both an IPv4 address and an IPv6
+address from a private ULA prefix, which the firewall masquerades out to the
+Internet. Both lines matter together. `AllowedIPs` includes `::/0`, which tells
+the device to send IPv6 into the tunnel, and the IPv6 entry in `Address` is what
+gives it a source address to send from. If the address is missing while `::/0`
+is present, IPv6 has nowhere to go and is silently dropped, which breaks
+IPv6-only destinations while IPv4 keeps working. A ULA is used rather than the
+ISP's prefix so client configs stay valid when the ISP rotates its prefix.
 
 ## Verifying and troubleshooting (admin)
 

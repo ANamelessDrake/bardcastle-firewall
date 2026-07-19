@@ -22,8 +22,8 @@
                               |  enp1s0 (WAN) ---- enp2s0 (LAN)   |
                               |       |                  |         |
                               |   nftables NAT      10.0.1.1/24   |
-                              |   WireGuard wg0                    |
-                              |   10.10.10.1/24                    |
+                              |   WireGuard wg0 (dual stack)       |
+                              |   10.10.10.1/24 + ULA ::1/64       |
                               +-----------------+------------------+
                                                 |
                                                 | LAN (10.0.1.0/24)
@@ -123,6 +123,25 @@ Ubuntu Server 24.04 LTS was chosen because:
 4. Decapsulated packet is forwarded from `wg0` to `enp2s0`
 5. nftables forward chain: matched by `WG to LAN` rule, accepted
 6. Packet delivered to the LAN destination
+
+### VPN IPv6 (dual stack tunnel)
+
+The tunnel carries both address families. Alongside `10.10.10.0/24` it runs a
+private ULA prefix (RFC 4193), with the server on `<prefix>::1` and each client
+deriving its address from its IPv4 host octet, so `10.10.10.5` becomes
+`<prefix>::5`. Client IPv6 traffic is masqueraded out the WAN by a `table ip6
+nat` postrouting rule (NAT66).
+
+A ULA is used instead of addressing clients from the ISP's prefix because the
+WAN prefix is dynamic (SLAAC, no delegation configured) and every client config
+would be invalidated each time the ISP rotates it. NAT66 is the tradeoff that
+buys stable client configs.
+
+This matters for correctness, not just reachability: clients are issued
+`AllowedIPs = 0.0.0.0/0, ::/0`, so the device routes IPv6 into the tunnel. If
+the tunnel had no IPv6 addressing, that traffic would have no source address
+and be silently dropped, breaking IPv6-only destinations while IPv4 kept
+working. The outer transport is still IPv4, so this needs no DDNS AAAA record.
 
 ### Inbound from Internet (blocked)
 

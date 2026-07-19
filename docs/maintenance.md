@@ -79,7 +79,9 @@ The `bardcastle-fw` tool also keeps timestamped backups of config files it overw
 sudo bardcastle-fw vpn add-client <name>
 ```
 
-This generates a client keypair, assigns the next available IP in `10.10.10.0/24`, updates the server config, restarts WireGuard, and prints the client configuration. If `qrencode` is installed, a scannable QR code is also displayed for mobile devices.
+This generates a client keypair, assigns the next available IP in `10.10.10.0/24` plus the matching IPv6 address from the tunnel's ULA prefix (the IPv4 host octet is reused, so `10.10.10.5` becomes `<prefix>::5`), updates the server config, restarts WireGuard, and prints the client configuration. If `qrencode` is installed, a scannable QR code is also displayed for mobile devices.
+
+Clients created before the tunnel became dual stack keep working over IPv4 and gain IPv6 by adding their IPv6 address to the `Address` line, with no re-keying. See "Enabling IPv6 on a client created before the tunnel was dual stack" in [vpn-client-setup.md](vpn-client-setup.md), and note that NetworkManager-managed Linux clients need an `nmcli` change as well, because editing the config file alone has no effect there.
 
 Example:
 

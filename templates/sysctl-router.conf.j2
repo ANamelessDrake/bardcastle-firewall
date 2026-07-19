@@ -63,8 +63,14 @@ net.ipv4.conf.default.log_martians = 1
 # IPv6 Autoconf — Disable on WAN
 # =============================================================================
 
-# Disable IPv6 autoconfiguration on the WAN interface. The WAN address should
-# be assigned by DHCPv6 or statically, not via SLAAC, to maintain control over
-# the router's external addressing.
+# Disable the *kernel's* IPv6 autoconfiguration on the WAN. This does not
+# disable IPv6 on the WAN: systemd-networkd manages that interface and performs
+# router-advertisement and DHCPv6 handling itself in userspace (it sets the
+# kernel's accept_ra to 0 for exactly this reason), so the WAN still receives a
+# global IPv6 address and default route from the ISP.
+#
+# Do not "fix" this by disabling IPv6 on the WAN. The VPN tunnel is dual stack
+# and masquerades its ULA prefix out this interface (NAT66), so a WAN without a
+# global IPv6 address silently breaks IPv6 for every VPN client.
 net.ipv6.conf.{{ wan_interface }}.autoconf = 0
 net.ipv6.conf.{{ wan_interface }}.accept_ra = 0

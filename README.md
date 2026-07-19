@@ -49,7 +49,10 @@ mini-PCs with Intel i226-V 2.5GbE NICs).
   per-query logging, and name resolution for VPN clients.
 - **WireGuard VPN**: server plus full client lifecycle (add, show/QR, re-key,
   revoke), per-client DNS names, dynamic DNS endpoint, and a dashboard-access
-  allowlist so only your own devices can reach the web UI over the tunnel.
+  allowlist so only your own devices can reach the web UI over the tunnel. The
+  tunnel is dual stack: clients get IPv4 plus an IPv6 address from a private
+  ULA prefix that is masqueraded out the WAN, so IPv6-only destinations work
+  without depending on the ISP's (rotating) prefix.
 - **Intrusion detection** (CrowdSec + nftables bouncer) with FireHOL threat
   blocklists; optional Suricata IDS.
 - **System hardening**: key-only SSH for a single user, fail2ban, unattended
@@ -202,7 +205,12 @@ vpn:
   server_ip: 10.10.10.1
   port: 51820
   hostname: vpn.example.com  # DDNS endpoint clients dial
+  ip6_prefix: fd00:1234:5678::   # tunnel ULA prefix (generated at setup)
+  server_ip6: fd00:1234:5678::1  # server's address inside the tunnel
   clients: []                # managed by the vpn subcommands
+
+monitoring:
+  journal_max_use: 500M      # journald retention cap; raise on a big disk
 
 configured: {}               # per-module state, set by the tool
 ```
