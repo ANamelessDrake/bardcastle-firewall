@@ -241,7 +241,14 @@ def update(config: dict) -> dict:
     ddns["last_ip"] = ip
 
     if ddns.get("ipv6"):
-        _update_ipv6(config, ddns, client, zone_id)
+        # A v6 problem must not take the A record down with it. The A record is
+        # what VPN clients resolve to find the endpoint, so it is the critical
+        # path; the AAAA is informational. Log and carry on so the run still
+        # saves state and the timer keeps working.
+        try:
+            _update_ipv6(config, ddns, client, zone_id)
+        except Exception as exc:
+            click.echo(f"  IPv6: update failed: {exc}", err=True)
 
     save_config(config)
     return config
