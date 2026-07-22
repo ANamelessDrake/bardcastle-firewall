@@ -408,6 +408,24 @@ step from the NetworkManager section above. Clients that have not been updated
 keep working normally over IPv4, so this can be rolled out one device at a time
 with no coordinated cutover.
 
+**Autoconnect on NetworkManager clients:** an imported or newly created
+NetworkManager connection defaults to `connection.autoconnect yes`, so it
+brings the full-tunnel VPN up on every boot and network change. For a machine
+that normally sits on the home LAN, that is usually not wanted (the tunnel is
+redundant there, and it routes all traffic back through the firewall). Turn it
+off so the tunnel only comes up on demand:
+
+```bash
+sudo nmcli connection modify bardcastle-vpn connection.autoconnect no
+```
+
+Leave it on only for a device that should always be tunneled (an off-site or
+untrusted-network machine). The dispatcher approach in the NetworkManager
+section above is the middle ground: autoconnect off, but connect automatically
+whenever the machine is away from the home LAN. Also confirm the imported
+config file is `chmod 600` (it holds the client private key; NetworkManager
+imports do not always tighten it).
+
 **Offboarding or a lost device:** run `remove-client NAME`. It removes the
 peer's public key from the server, so that device can no longer connect. This
 works for both key modes and needs nothing from the device.
