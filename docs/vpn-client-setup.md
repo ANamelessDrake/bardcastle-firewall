@@ -521,3 +521,56 @@ A working client shows `Online: yes` and a recent handshake once it connects.
   and that `DNS = 10.0.1.1` is set in the client config.
 - **Was working, now dead:** the client's key may have been rotated or the
   client revoked. Re-provision with a fresh config.
+
+### Connected, but slow and half broken (MTU)
+
+Symptoms: the tunnel connects and stays connected, DNS resolves, pings work,
+small pages may load, but TLS handshakes and real transfers stall or time out.
+Users describe it as "the VPN is connected but nothing works" or "it made my
+internet really slow". Nothing logs an error, because nothing is refused, the
+packets simply disappear.
+
+Cause: the client is on a path with a smaller MTU than the tunnel assumes
+(hotel wifi, mobile hotspot, PPPoE, another VPN). Oversized packets are dropped
+upstream, and the ICMP "fragmentation needed" reply that would trigger path MTU
+discovery is usually filtered, so nothing adjusts. Small packets pass, large
+ones vanish. This is easily mistaken for a DNS, routing, or IPv6 fault.
+
+Confirm it from the firewall by pinging the client with the do-not-fragment bit
+at increasing sizes and finding where it stops:
+
+```bash
+for sz in 1200 1300 1360 1380 1400; do
+    printf "%s: " "$sz"
+    ping -c1 -W2 -M do -s $sz 10.10.10.4 >/dev/null 2>&1 && echo OK || echo FAIL
+done
+```
+
+A clean tunnel answers at every size. If it answers at 1300 and fails at 1380,
+the usable MTU is below what the tunnel is configured for, and that gap is the
+blackhole.
+
+Fix it on the client by lowering its tunnel MTU. 1280 is the IPv6 minimum, so
+it is safe on any network the device roams onto:
+
+```bash
+# NetworkManager-managed client
+sudo nmcli connection modify bardcastle-vpn wireguard.mtu 1280
+sudo nmcli connection down bardcastle-vpn && sudo nmcli connection up bardcastle-vpn
+
+# wg-quick client: add "MTU = 1280" under [Interface], then re-up the tunnel
+```
+
+To change it without dropping the tunnel (useful when you are administering the
+machine over that same tunnel), set it on the live interface first, then persist
+it in the profile:
+
+```bash
+sudo ip link set bardcastle-vpn mtu 1280
+```
+
+The server side already mitigates this for everyone: `wg0` runs a reduced MTU
+and nftables clamps TCP MSS on the tunnel, so TCP adapts automatically. That
+covers web and most internal services, but it cannot help UDP-based protocols
+such as QUIC/HTTP-3, so a client on a constrained path still wants its own MTU
+lowered.

@@ -143,6 +143,23 @@ the tunnel had no IPv6 addressing, that traffic would have no source address
 and be silently dropped, breaking IPv6-only destinations while IPv4 kept
 working. The outer transport is still IPv4, so this needs no DDNS AAAA record.
 
+### VPN MTU handling
+
+Roaming clients frequently sit behind a path with a smaller MTU than the tunnel
+assumes. Oversized packets are dropped upstream, and the ICMP reply that would
+drive path MTU discovery is commonly filtered, so the failure is silent: small
+packets pass while large ones vanish. Two mitigations run server side.
+
+`wg0` uses a reduced MTU rather than WireGuard's 1420 default, so the router
+never originates packets that are too large for a typical constrained path. The
+forward chain then clamps TCP MSS on the tunnel to the route MTU, which makes
+both ends negotiate a segment that fits and fixes TCP in both directions
+without any client change.
+
+Neither helps UDP-based protocols such as QUIC, so a client on an unusually
+small path still needs its own tunnel MTU lowered; see the MTU section of
+[vpn-client-setup.md](vpn-client-setup.md).
+
 ### Inbound from Internet (blocked)
 
 1. Packet arrives on `enp1s0`

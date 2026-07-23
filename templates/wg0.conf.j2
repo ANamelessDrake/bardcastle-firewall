@@ -14,6 +14,12 @@ Address = {{ server_ip }}/24{% if server_ip6 %}, {{ server_ip6 }}/64{% endif %}
 # UDP port to listen on for incoming WireGuard connections
 ListenPort = {{ vpn_port }}
 
+# Tunnel MTU. Lower than WireGuard's 1420 default because clients roam onto
+# paths with a smaller MTU (hotel wifi, mobile hotspot, PPPoE) where oversized
+# packets are dropped without a usable ICMP reply, producing a silent blackhole
+# rather than an error. Paired with the MSS clamping rules in nftables.conf.
+MTU = {{ vpn_mtu | default(1360) }}
+
 # Optional: PostUp/PostDown hooks for nftables integration.
 # These are commented out because the main nftables.conf already includes
 # the WireGuard accept rules and NAT masquerade. Uncomment only if you

@@ -137,6 +137,7 @@ def _render_and_apply_server_config(config: dict) -> None:
         "server_ip": vpn["server_ip"],
         "server_ip6": vpn.get("server_ip6"),
         "vpn_port": vpn["port"],
+        "vpn_mtu": vpn.get("mtu", 1360),
         "clients": _clients_with_ip6(config),
     })
     write_config_file("/etc/wireguard/wg0.conf", content, mode=0o600)

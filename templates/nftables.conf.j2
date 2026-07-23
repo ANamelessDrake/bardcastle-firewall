@@ -120,6 +120,25 @@ table inet filter {
         # Drop invalid states
         ct state invalid counter drop comment "Drop invalid ct states fwd"
 
+        # Clamp TCP MSS on the tunnel to the route's MTU.
+        #
+        # A roaming VPN client often sits behind a path with a smaller MTU than
+        # the tunnel assumes (hotel wifi, mobile hotspot, PPPoE). Oversized
+        # packets are then dropped somewhere upstream, and because the ICMP
+        # "fragmentation needed" reply is frequently filtered, path MTU
+        # discovery never learns about it. The result is a silent blackhole:
+        # DNS and connection setup succeed because they are small, while TLS
+        # handshakes and real transfers stall. That presents as "the VPN is
+        # connected but everything is slow or times out", which is painful to
+        # diagnose.
+        #
+        # Rewriting the MSS in the SYN makes both ends negotiate a segment that
+        # fits, which fixes TCP in both directions without touching any client.
+        # It does not cover UDP (QUIC/HTTP-3), so clients on a constrained path
+        # should also lower their own tunnel MTU.
+        iifname "wg0" tcp flags syn tcp option maxseg size set rt mtu counter comment "Clamp MSS from VPN"
+        oifname "wg0" tcp flags syn tcp option maxseg size set rt mtu counter comment "Clamp MSS to VPN"
+
         # LAN -> WAN: allow internal hosts to reach the Internet
         iifname {{ lan_interface }} oifname {{ wan_interface }} accept comment "LAN to WAN"
 
