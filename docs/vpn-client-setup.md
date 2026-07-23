@@ -482,6 +482,7 @@ Notes:
 PrivateKey = <client private key>
 Address    = 10.10.10.2/24, fd00:1234:5678::2/64   # this client's VPN addresses
 DNS        = 10.0.1.1             # resolves internal hostnames over the VPN
+MTU        = 1280                 # safe on any network the device roams onto
 
 [Peer]
 PublicKey           = <server public key>
@@ -503,6 +504,14 @@ gives it a source address to send from. If the address is missing while `::/0`
 is present, IPv6 has nowhere to go and is silently dropped, which breaks
 IPv6-only destinations while IPv4 keeps working. A ULA is used rather than the
 ISP's prefix so client configs stay valid when the ISP rotates its prefix.
+
+`MTU = 1280` is deliberately lower than WireGuard's 1420 default. A device that
+roams onto a path with a smaller MTU has its oversized packets dropped upstream
+with no usable error, so the tunnel connects but large transfers stall. 1280 is
+the IPv6 minimum that every network must carry, so it keeps working wherever the
+device goes; see the MTU troubleshooting section below. Clients provisioned
+before this became the default will not have the line, and can have it added by
+hand without re-issuing keys.
 
 ## Verifying and troubleshooting (admin)
 
