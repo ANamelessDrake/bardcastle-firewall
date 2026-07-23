@@ -27,7 +27,7 @@ MTU = {{ client_mtu | default(1280) }}
 # Server's public key
 PublicKey = {{ server_public_key }}
 
-# Server endpoint — the router's public IP or hostname and WireGuard port
+# Server endpoint: the router's public IP or hostname and WireGuard port
 Endpoint = {{ endpoint }}:{{ vpn_port }}
 
 # Route ALL traffic through the VPN (full tunnel mode).
