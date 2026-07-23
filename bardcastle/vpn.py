@@ -353,6 +353,7 @@ def _emit_client_config(config: dict, client: dict, qr_file: str | None = None,
         "server_public_key": vpn["server_public_key"],
         "endpoint": _client_endpoint(config),
         "vpn_port": vpn["port"],
+        "client_mtu": vpn.get("client_mtu", 1280),
     })
 
     click.echo("\n========== Client Configuration ==========")
