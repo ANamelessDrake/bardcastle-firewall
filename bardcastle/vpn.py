@@ -130,7 +130,11 @@ def _generate_keypair() -> tuple[str, str]:
 
 
 def _render_and_apply_server_config(config: dict) -> None:
-    """Re-render wg0.conf from the current VPN config and reload."""
+    """Re-render wg0.conf from the current VPN config.
+
+    This only writes the file; call _reload_server() afterwards to apply it to
+    the running tunnel.
+    """
     vpn = config["vpn"]
     content = render_template("wg0.conf.j2", {
         "server_private_key": vpn["server_private_key"],
@@ -141,6 +145,32 @@ def _render_and_apply_server_config(config: dict) -> None:
         "clients": _clients_with_ip6(config),
     })
     write_config_file("/etc/wireguard/wg0.conf", content, mode=0o600)
+
+
+def _reload_server() -> None:
+    """Apply peer changes to the running tunnel without dropping sessions.
+
+    `systemctl reload` runs the wg-quick unit's ExecReload, which is
+    `wg syncconf wg0 <(wg-quick strip wg0)`. That adds, removes and re-keys
+    peers in place, so peers that did not change keep their handshake, endpoint
+    and transfer counters.
+
+    A `restart` is deliberately not used here: it tears down and recreates the
+    interface, which cuts every connected client and zeroes every peer's
+    counters, so adding one client would interrupt everyone else.
+
+    syncconf applies peer and listen-port changes only. Interface-level settings
+    (Address, MTU, DNS, routes) are not applied, so anything that changes those
+    still needs a full restart.
+
+    When the tunnel is not running there is no session to preserve and no
+    interface for syncconf to talk to, so start it instead.
+    """
+    active = run_cmd(["systemctl", "is-active", "wg-quick@wg0"], check=False)
+    if active.stdout.strip() == "active":
+        run_cmd(["systemctl", "reload", "wg-quick@wg0"])
+    else:
+        run_cmd(["systemctl", "restart", "wg-quick@wg0"])
 
 
 def setup(config: dict) -> dict:
@@ -289,7 +319,7 @@ def add_client(config: dict, name: str, pubkey: str | None = None,
 
     # Re-render and apply server config with new peer
     _render_and_apply_server_config(config)
-    run_cmd(["systemctl", "restart", "wg-quick@wg0"])
+    _reload_server()
     click.echo("Server config updated and reloaded.")
 
     # Persist now, before any cosmetic output, so a display error can never
@@ -543,7 +573,7 @@ def remove_client(config: dict, name: str) -> dict:
         c for c in config["vpn"]["clients"] if c["name"] != name
     ]
     _render_and_apply_server_config(config)
-    run_cmd(["systemctl", "restart", "wg-quick@wg0"])
+    _reload_server()
     save_config(config)
 
     # Drop the client's DNS name.
@@ -596,7 +626,7 @@ def rotate_client(config: dict, name: str, pubkey: str | None = None,
             client.pop("private_key", None)
 
     _render_and_apply_server_config(config)
-    run_cmd(["systemctl", "restart", "wg-quick@wg0"])
+    _reload_server()
     save_config(config)
 
     events.emit_event("config_change", {
@@ -637,7 +667,7 @@ def rotate_all(config: dict) -> dict:
         rotated.append(client)
 
     _render_and_apply_server_config(config)
-    run_cmd(["systemctl", "restart", "wg-quick@wg0"])
+    _reload_server()
     save_config(config)
 
     events.emit_event("config_change", {

@@ -373,6 +373,13 @@ sudo bardcastle-fw vpn remove-client NAME # revoke a client immediately (lost de
 sudo bardcastle-fw vpn rotate-all         # re-key every server-managed client (compromise drill)
 ```
 
+**These operations do not disturb other clients.** Adding, removing or
+re-keying a client is applied to the running tunnel with
+`systemctl reload wg-quick@wg0`, which syncs peers in place rather than
+restarting the interface, so anyone currently connected stays connected and
+keeps their handshake and transfer counters. See "Applying peer changes" in
+[maintenance.md](maintenance.md#applying-peer-changes).
+
 **Dashboard access over the VPN:** by default no VPN client can reach the web
 dashboard (ports 80/443) through the tunnel. Grant it per client with `vpn
 admin NAME`; only those clients are allowed, every other VPN user is denied by

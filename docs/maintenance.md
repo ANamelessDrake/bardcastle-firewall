@@ -79,7 +79,7 @@ The `bardcastle-fw` tool also keeps timestamped backups of config files it overw
 sudo bardcastle-fw vpn add-client <name>
 ```
 
-This generates a client keypair, assigns the next available IP in `10.10.10.0/24` plus the matching IPv6 address from the tunnel's ULA prefix (the IPv4 host octet is reused, so `10.10.10.5` becomes `<prefix>::5`), updates the server config, restarts WireGuard, and prints the client configuration. If `qrencode` is installed, a scannable QR code is also displayed for mobile devices.
+This generates a client keypair, assigns the next available IP in `10.10.10.0/24` plus the matching IPv6 address from the tunnel's ULA prefix (the IPv4 host octet is reused, so `10.10.10.5` becomes `<prefix>::5`), updates the server config, reloads WireGuard in place, and prints the client configuration. Other clients stay connected throughout; see [Applying peer changes](#applying-peer-changes). If `qrencode` is installed, a scannable QR code is also displayed for mobile devices.
 
 Clients created before the tunnel became dual stack keep working over IPv4 and gain IPv6 by adding their IPv6 address to the `Address` line, with no re-keying. See "Enabling IPv6 on a client created before the tunnel was dual stack" in [vpn-client-setup.md](vpn-client-setup.md), and note that NetworkManager-managed Linux clients need an `nmcli` change as well, because editing the config file alone has no effect there.
 
@@ -101,21 +101,38 @@ sudo wg show
 
 ### Remove a Client
 
-Currently, client removal is manual:
-
-1. Edit `/etc/bardcastle/config.yaml` and remove the client entry from the `vpn.clients` list
-2. Regenerate the server config and restart WireGuard:
-
 ```bash
-sudo bardcastle-fw vpn setup
-# When prompted, choose to reconfigure
+sudo bardcastle-fw vpn remove-client <name>
 ```
 
-Alternatively, edit `/etc/wireguard/wg0.conf` directly to remove the `[Peer]` block, then:
+This removes the peer from both `/etc/bardcastle/config.yaml` and
+`/etc/wireguard/wg0.conf`, drops the client's DNS name, and applies the change
+to the running tunnel at once, so the revoked config stops working immediately.
+Other clients are not disturbed.
+
+To remove a peer by hand instead, delete its `[Peer]` block from
+`/etc/wireguard/wg0.conf` and apply the file in place:
 
 ```bash
-sudo systemctl restart wg-quick@wg0
+sudo systemctl reload wg-quick@wg0
 ```
+
+### Applying peer changes
+
+`add-client`, `remove-client`, `rotate-client` and `rotate-all` apply their
+changes with `systemctl reload wg-quick@wg0`, which runs
+`wg syncconf wg0 <(wg-quick strip wg0)`. That adds, removes and re-keys peers
+in place: peers that did not change keep their handshake, endpoint and transfer
+counters, and anyone connected stays connected.
+
+Do not use `systemctl restart wg-quick@wg0` for a peer change. A restart tears
+down and recreates the interface, which disconnects every connected client and
+zeroes every peer's counters, so adding one client would interrupt everyone
+else and wipe the usage figures `vpn clients` reports.
+
+A restart is still the right tool when an interface-level setting changes
+(`Address`, `MTU`, `ListenPort` beyond what syncconf handles, or the routes
+wg-quick installs), because `syncconf` does not apply those.
 
 ---
 
