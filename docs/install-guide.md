@@ -54,7 +54,7 @@ sudo reboot
 ```bash
 sudo apt install -y git python3-pip python3-venv
 cd ~
-git clone https://github.com/YOUR-USERNAME/bardcastle-firewall.git
+git clone https://github.com/ANamelessDrake/bardcastle-firewall.git
 cd bardcastle-firewall
 ```
 

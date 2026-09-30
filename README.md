@@ -108,7 +108,7 @@ drives component choices such as dnsmasq over BIND).
 Builds a custom Ubuntu installer that sets everything up unattended.
 
 ```bash
-git clone https://github.com/YOUR-USERNAME/bardcastle-firewall.git
+git clone https://github.com/ANamelessDrake/bardcastle-firewall.git
 cd bardcastle-firewall
 
 # Download the Ubuntu Server 24.04 LTS ISO into the repo root.
@@ -151,7 +151,7 @@ by marker files under `/etc/bardcastle/`), so it is safe across reboots.
 3. Install the CLI:
    ```bash
    sudo apt install -y git python3-pip
-   git clone https://github.com/YOUR-USERNAME/bardcastle-firewall.git
+   git clone https://github.com/ANamelessDrake/bardcastle-firewall.git
    cd bardcastle-firewall
    sudo pip install -e .
    ```
