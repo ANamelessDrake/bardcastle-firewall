@@ -25,6 +25,13 @@ FIREHOL_URL = "https://iplists.firehol.org/files/firehol_level1.netset"
 BLOCKLIST_NETSET = "/tmp/firehol_level1.netset"
 CRON_FILE = "/etc/cron.d/bardcastle-blocklists"
 
+# FireHOL level1 is IPv4-only (its header literally declares "ipv4 hash:net
+# ipset"), and FireHOL publishes no IPv6 equivalent. The IPv6 set is fed from
+# the Spamhaus IPv6 DROP list instead, which is the closest maintained analogue:
+# hijacked and criminal-controlled netblocks, safe to drop wholesale.
+SPAMHAUS_V6_URL = "https://www.spamhaus.org/drop/dropv6.txt"
+BLOCKLIST_NETSET_V6 = "/tmp/spamhaus_dropv6.txt"
+
 # FireHOL level1 targets internet edges and includes all private/reserved
 # space. Loading those into the blocklist drops the router's own LAN (and,
 # behind another NAT, its WAN) — a total self-inflicted outage. Never load
@@ -42,31 +49,76 @@ EXCLUDED_RANGES = [ipaddress.ip_network(n) for n in (
     "240.0.0.0/4",      # reserved
 )]
 
+# The IPv6 equivalents. fc00::/7 matters most here: the WireGuard tunnel's ULA
+# prefix lives inside it, so without this exclusion a bad feed entry could
+# blackhole every VPN client. Cross-family overlaps() returns False rather than
+# raising, so an IPv4-only exclusion list would silently pass all of these
+# through instead of failing loudly.
+EXCLUDED_RANGES_V6 = [ipaddress.ip_network(n) for n in (
+    "::/128",           # unspecified
+    "::1/128",          # loopback
+    "::ffff:0:0/96",    # IPv4-mapped
+    "fc00::/7",         # ULA (includes the VPN tunnel prefix)
+    "fe80::/10",        # link-local
+    "ff00::/8",         # multicast
+    "2001:db8::/32",    # documentation
+)]
 
-def _filter_public(entries: list[str]) -> tuple[list[str], int]:
-    """Drop entries that overlap private/reserved space.
+_EXCLUDED_BY_VERSION = {4: EXCLUDED_RANGES, 6: EXCLUDED_RANGES_V6}
+
+
+def _filter_public(entries: list[str], version: int = 4) -> tuple[list[str], int]:
+    """Drop entries that overlap private/reserved space for the given family.
+
+    `version` is 4 or 6 and selects both the exclusion list and the family of
+    entry accepted; an entry from the wrong family is skipped rather than
+    loaded, since each nftables set is typed to one family and would reject it.
 
     Returns (kept_entries, skipped_count). Unparseable lines are skipped.
     """
     kept: list[str] = []
     skipped = 0
+    excluded = _EXCLUDED_BY_VERSION[version]
     for entry in entries:
         try:
             net = ipaddress.ip_network(entry, strict=False)
         except ValueError:
             skipped += 1
             continue
-        if any(net.overlaps(excl) for excl in EXCLUDED_RANGES):
+        if net.version != version:
+            skipped += 1
+            continue
+        if any(net.overlaps(excl) for excl in excluded):
             skipped += 1
             continue
         kept.append(entry)
     return kept, skipped
 
 
-def _load_ips_nftables(ips: list[str]) -> None:
-    """Load a list of IPs/CIDRs into the nftables blocklist_v4 set.
+def _parse_netset(path: str) -> list[str]:
+    """Read CIDR entries from a netset/DROP file.
 
-    Tries python3-nftables bindings first, falls back to the nft CLI.
+    Handles both FireHOL ('#' comments, bare CIDRs) and Spamhaus DROP
+    (';' comments, and a trailing '; SBL<id>' annotation after each CIDR).
+    """
+    entries: list[str] = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line[0] in "#;":
+                continue
+            entry = line.split(";")[0].strip()
+            if entry:
+                entries.append(entry)
+    return entries
+
+
+def _load_ips_nftables(ips: list[str], set_name: str = "blocklist_v4") -> None:
+    """Load a list of IPs/CIDRs into the named nftables set.
+
+    `set_name` is blocklist_v4 or blocklist_v6, both declared in
+    nftables.conf.j2. Tries python3-nftables bindings first, falls back to the
+    nft CLI.
     """
     try:
         import nftables  # type: ignore[import-untyped]
@@ -75,39 +127,84 @@ def _load_ips_nftables(ips: list[str]) -> None:
         nft.set_json_output(True)
 
         # Flush the existing set
-        nft.cmd("flush set inet filter blocklist_v4")
+        nft.cmd(f"flush set inet filter {set_name}")
 
         # Add elements in batches to avoid command-line length limits
         batch_size = 500
         for i in range(0, len(ips), batch_size):
             batch = ips[i:i + batch_size]
             elements = ", ".join(batch)
-            nft.cmd(f"add element inet filter blocklist_v4 {{ {elements} }}")
+            nft.cmd(f"add element inet filter {set_name} {{ {elements} }}")
 
-        click.echo("Loaded IPs via python3-nftables bindings.")
+        click.echo(f"Loaded {len(ips)} entries into {set_name} via python3-nftables bindings.")
     except (ImportError, Exception) as exc:
         click.echo(f"nftables bindings unavailable ({exc}), falling back to nft CLI.")
 
         # Flush the existing set
-        run_cmd(["nft", "flush", "set", "inet", "filter", "blocklist_v4"])
+        run_cmd(["nft", "flush", "set", "inet", "filter", set_name])
 
         # Add elements in batches
         batch_size = 500
         for i in range(0, len(ips), batch_size):
             batch = ips[i:i + batch_size]
             elements = ", ".join(batch)
-            run_cmd(["nft", "add", "element", "inet", "filter", "blocklist_v4",
+            run_cmd(["nft", "add", "element", "inet", "filter", set_name,
                       f"{{ {elements} }}"])
 
-        click.echo("Loaded IPs via nft CLI.")
+        click.echo(f"Loaded {len(ips)} entries into {set_name} via nft CLI.")
+
+
+def _refresh_blocklist_set(source: str, url: str, path: str,
+                           set_name: str, version: int) -> int | None:
+    """Download one feed and load it into its nftables set.
+
+    Returns the number of entries loaded, or None if the feed could not be
+    used. On failure the existing set is deliberately left in place: stale
+    blocklist entries are better than an empty set.
+    """
+    click.echo(f"Downloading {source}...")
+    # -f so an HTTP error is a non-zero exit instead of an error page written
+    # to the file, -L to follow redirects, and a short retry for transient DNS.
+    result = run_cmd(["curl", "-fsS", "-L", "--retry", "2", "--max-time", "60",
+                      "-o", path, url], check=False)
+    if result.returncode != 0:
+        click.echo(f"Warning: download failed for {source} "
+                   f"(curl exit {result.returncode}); leaving {set_name} unchanged.")
+        return None
+
+    try:
+        entries = _parse_netset(path)
+    except OSError as exc:
+        click.echo(f"Warning: could not read {path} for {source} ({exc}); "
+                   f"leaving {set_name} unchanged.")
+        return None
+
+    if not entries:
+        click.echo(f"Warning: no entries found in {source}; "
+                   f"leaving {set_name} unchanged.")
+        return None
+
+    entries, skipped = _filter_public(entries, version=version)
+    click.echo(
+        f"Parsed {len(entries)} public entries from {source} "
+        f"({skipped} private/reserved/wrong-family entries excluded)."
+    )
+    if not entries:
+        click.echo(f"Warning: nothing left after filtering {source}; "
+                   f"leaving {set_name} unchanged.")
+        return None
+
+    _load_ips_nftables(entries, set_name=set_name)
+    return len(entries)
 
 
 def update(config: dict) -> dict:
-    """Update blocklists from CrowdSec and FireHOL.
+    """Update blocklists from CrowdSec, FireHOL (IPv4) and Spamhaus (IPv6).
 
-    If CrowdSec is installed, updates the hub and installs the base
-    Linux collection. Downloads the FireHOL level-1 netset and loads
-    all IPs into the nftables blocklist_v4 set.
+    If CrowdSec is installed, updates the hub and installs the base Linux
+    collection. Downloads the FireHOL level-1 netset into blocklist_v4 and the
+    Spamhaus IPv6 DROP list into blocklist_v6. Each feed is refreshed
+    independently so one failing source cannot take the other down.
 
     Args:
         config: The current bardcastle config dict.
@@ -126,39 +223,24 @@ def update(config: dict) -> dict:
     else:
         click.echo("CrowdSec not installed; skipping hub update.")
 
-    # Download FireHOL level1 blocklist
-    click.echo("Downloading FireHOL level1 blocklist...")
-    run_cmd(["curl", "-s", "-o", BLOCKLIST_NETSET, FIREHOL_URL])
+    # Refresh each family independently: a Spamhaus outage must not stop the
+    # IPv4 refresh, and vice versa.
+    loaded = 0
+    for source, url, path, set_name, version in (
+        ("firehol_level1", FIREHOL_URL, BLOCKLIST_NETSET, "blocklist_v4", 4),
+        ("spamhaus_dropv6", SPAMHAUS_V6_URL, BLOCKLIST_NETSET_V6, "blocklist_v6", 6),
+    ):
+        count = _refresh_blocklist_set(source, url, path, set_name, version)
+        if count is not None:
+            loaded += 1
+            events.emit_event("blocklist_update", {
+                "source": source,
+                "count": count,
+            })
 
-    # Parse the netset file
-    ips: list[str] = []
-    with open(BLOCKLIST_NETSET) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            ips.append(line)
-
-    if not ips:
-        click.echo("Warning: no IPs found in the blocklist file.")
+    if not loaded:
+        click.echo("Warning: no blocklist could be refreshed; sets left unchanged.")
         return config
-
-    ips, skipped = _filter_public(ips)
-    click.echo(
-        f"Parsed {len(ips)} public entries from FireHOL level1 "
-        f"({skipped} private/reserved entries excluded)."
-    )
-    if not ips:
-        click.echo("Warning: no public IPs left after filtering; not loading.")
-        return config
-
-    # Load into nftables
-    _load_ips_nftables(ips)
-
-    events.emit_event("blocklist_update", {
-        "source": "firehol_level1",
-        "count": len(ips),
-    })
 
     mark_configured(config, "blocklists")
     save_config(config)
@@ -191,16 +273,17 @@ def show_stats() -> None:
     click.echo("\n--- Blocklist Statistics ---")
 
     # nftables set counts
-    try:
-        result = run_shell(
-            "nft list set inet filter blocklist_v4 2>/dev/null | "
-            "grep -c -E '^\\s+[0-9]'",
-            check=False,
-        )
-        count = result.stdout.strip() if result.returncode == 0 else "0"
-        click.echo(f"nftables blocklist_v4 entries: {count}")
-    except Exception:
-        click.echo("Could not query nftables blocklist_v4 set.")
+    for set_name, pattern in (("blocklist_v4", "[0-9]"), ("blocklist_v6", "[0-9a-fA-F:]")):
+        try:
+            result = run_shell(
+                f"nft list set inet filter {set_name} 2>/dev/null | "
+                f"grep -c -E '^\\s+{pattern}'",
+                check=False,
+            )
+            count = result.stdout.strip() if result.returncode == 0 else "0"
+            click.echo(f"nftables {set_name} entries: {count}")
+        except Exception:
+            click.echo(f"Could not query nftables {set_name} set.")
 
     # CrowdSec decisions
     if shutil.which("cscli"):
